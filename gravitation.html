@@ -1,0 +1,1341 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gravitations-Simulation · Satellit um die Erde</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:           #0a0f1f;
+    --bg-grad-1:    #0e1530;
+    --bg-grad-2:    #060914;
+    --panel:        #121a30;
+    --panel-2:      #182240;
+    --border:       #243057;
+    --border-soft:  #1c2542;
+    --text:         #e8edf7;
+    --text-mid:     #aab3cf;
+    --text-dim:     #6b7596;
+    --earth:        #4a90e2;
+    --earth-deep:   #1d4f8a;
+    --earth-land:   #3a7d57;
+    --sat:          #fbbf24;
+    --vec:          #22d3ee;
+    --vec-glow:     #06b6d4;
+    --bound:        #34d399;
+    --escape:       #f87171;
+    --warn:         #fb923c;
+    --accent:       #c4b5fd;
+    --shadow:       0 4px 20px rgba(0,0,0,.4);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    background: radial-gradient(ellipse at top, var(--bg-grad-1) 0%, var(--bg-grad-2) 70%);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    overflow: hidden;
+  }
+
+  .app {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    height: 100vh;
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 0 16px;
+  }
+
+  /* === HEADER === */
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 14px 4px 12px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+
+  .title h1 {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .title p {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 2px;
+    letter-spacing: 0.02em;
+  }
+
+  .legend {
+    display: flex;
+    gap: 18px;
+    font-size: 12px;
+    color: var(--text-mid);
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+
+  .dot.earth { background: radial-gradient(circle at 30% 30%, #6fa9e8, var(--earth-deep)); }
+  .dot.sat   { background: var(--sat); box-shadow: 0 0 6px var(--sat); }
+  .arrow-icon {
+    width: 18px;
+    height: 2px;
+    background: var(--vec);
+    position: relative;
+  }
+  .arrow-icon::after {
+    content: '';
+    position: absolute;
+    right: -1px;
+    top: -3px;
+    border-left: 6px solid var(--vec);
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+  }
+
+  /* === MAIN === */
+  main {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 14px;
+    padding: 14px 0;
+    min-height: 0;
+  }
+
+  /* === STAGE === */
+  .stage {
+    position: relative;
+    background: linear-gradient(180deg, #050918 0%, #0a1228 100%);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: crosshair;
+  }
+
+  canvas.drag-arrow { cursor: grabbing; }
+  canvas.over-arrow { cursor: grab; }
+  canvas.over-sat   { cursor: move; }
+
+  .hud {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(140px, auto));
+    gap: 6px 10px;
+    background: rgba(10, 15, 31, 0.72);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+  }
+
+  .readout {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    white-space: nowrap;
+  }
+
+  .readout.wide { grid-column: 1 / -1; }
+
+  .readout span {
+    color: var(--text-dim);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .readout b {
+    color: var(--text);
+    font-weight: 600;
+    font-size: 13px;
+    min-width: 60px;
+    text-align: right;
+  }
+
+  .readout i {
+    color: var(--text-dim);
+    font-style: normal;
+    font-size: 11px;
+  }
+
+  .readout.type b {
+    text-align: left;
+    min-width: 0;
+    color: var(--accent);
+  }
+
+  .scale-bar {
+    position: absolute;
+    bottom: 14px;
+    left: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-mid);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+  }
+
+  .scale-line {
+    width: 80px;
+    height: 2px;
+    background: var(--text-mid);
+    position: relative;
+  }
+  .scale-line::before,
+  .scale-line::after {
+    content: '';
+    position: absolute;
+    top: -3px;
+    width: 2px;
+    height: 8px;
+    background: var(--text-mid);
+  }
+  .scale-line::before { left: 0; }
+  .scale-line::after  { right: 0; }
+
+  .crash-banner {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(248, 113, 113, 0.15);
+    border: 1px solid var(--escape);
+    color: var(--escape);
+    padding: 16px 24px;
+    border-radius: 8px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 13px;
+    backdrop-filter: blur(6px);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .25s;
+  }
+  .crash-banner.show { opacity: 1; }
+
+  /* === PANEL === */
+  .panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 2px;
+  }
+
+  .panel::-webkit-scrollbar { width: 6px; }
+  .panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    padding: 12px 13px;
+  }
+
+  .card h3 {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-mid);
+    margin-bottom: 9px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .card h3::before {
+    content: '';
+    width: 3px;
+    height: 12px;
+    background: var(--accent);
+    border-radius: 2px;
+  }
+
+  .field {
+    margin-bottom: 8px;
+  }
+  .field:last-child { margin-bottom: 0; }
+
+  .field label {
+    display: block;
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+    letter-spacing: 0.02em;
+  }
+
+  .inputrow {
+    display: flex;
+    align-items: stretch;
+    background: var(--panel-2);
+    border: 1px solid var(--border-soft);
+    border-radius: 5px;
+    transition: border-color .15s;
+  }
+
+  .inputrow:focus-within {
+    border-color: var(--vec);
+  }
+
+  .inputrow input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    padding: 6px 8px;
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    min-width: 0;
+  }
+
+  .inputrow .unit {
+    display: flex;
+    align-items: center;
+    padding: 0 9px;
+    background: rgba(255,255,255,0.03);
+    border-left: 1px solid var(--border-soft);
+    color: var(--text-dim);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+  }
+
+  .field input[type="range"] {
+    width: 100%;
+    accent-color: var(--vec);
+  }
+
+  .field-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .field-row input[type="range"] { flex: 1; }
+  .field-row .unit {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    min-width: 50px;
+    text-align: right;
+  }
+
+  .presets {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+    margin-top: 4px;
+  }
+
+  .presets.v-presets {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .presets button {
+    background: var(--panel-2);
+    border: 1px solid var(--border-soft);
+    color: var(--text-mid);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 11px;
+    padding: 6px 4px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all .12s;
+  }
+
+  .presets button:hover {
+    background: var(--border);
+    color: var(--text);
+  }
+
+  .presets button.active {
+    background: rgba(34, 211, 238, 0.12);
+    border-color: var(--vec);
+    color: var(--vec);
+  }
+
+  .cosmic-info {
+    margin-top: 10px;
+    padding-top: 9px;
+    border-top: 1px dashed var(--border-soft);
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 5px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+  }
+
+  .cosmic-info > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .cosmic-info span {
+    color: var(--text-dim);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .cosmic-info b {
+    color: var(--bound);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .cosmic-info > div:nth-child(2) b { color: var(--warn); }
+  .cosmic-info > div:nth-child(3) b { color: var(--escape); }
+
+  .cosmic-info i {
+    color: var(--text-dim);
+    font-style: normal;
+    font-size: 10px;
+  }
+
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-mid);
+    user-select: none;
+    margin-top: 6px;
+  }
+
+  .check input { accent-color: var(--vec); }
+
+  .hint {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 6px;
+    font-style: italic;
+  }
+
+  /* === FOOTER === */
+  .controls-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 4px 14px;
+    border-top: 1px solid var(--border-soft);
+  }
+
+  .controls-bar button {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all .12s;
+  }
+
+  .controls-bar button:hover {
+    background: var(--panel-2);
+    border-color: var(--vec);
+  }
+
+  .controls-bar button.primary {
+    background: var(--vec);
+    border-color: var(--vec);
+    color: var(--bg);
+    font-weight: 600;
+  }
+
+  .controls-bar button.primary:hover {
+    background: var(--vec-glow);
+    box-shadow: 0 0 16px rgba(34, 211, 238, 0.4);
+  }
+
+  .controls-bar button.primary.paused {
+    background: var(--warn);
+    border-color: var(--warn);
+  }
+
+  .hotkeys {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-dim);
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  /* responsive */
+  @media (max-width: 980px) {
+    main { grid-template-columns: 1fr; grid-template-rows: 60vh 1fr; }
+    .panel { max-height: none; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="title">
+      <h1>Gravitations-Simulation · Satellit um die Erde</h1>
+      <p>Newtonsche Gravitation · Velocity-Verlet-Integration · 1., 2. und 3. kosmische Geschwindigkeit</p>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><span class="dot earth"></span>Zentralkörper</div>
+      <div class="legend-item"><span class="dot sat"></span>Satellit</div>
+      <div class="legend-item"><span class="arrow-icon"></span>v-Vektor</div>
+    </div>
+  </header>
+
+  <main>
+    <section class="stage">
+      <canvas id="canvas"></canvas>
+      <div class="hud">
+        <div class="readout"><span>|v|</span><b id="r_v">—</b><i>km/s</i></div>
+        <div class="readout"><span>r</span><b id="r_r">—</b><i>km</i></div>
+        <div class="readout"><span>Höhe</span><b id="r_h">—</b><i>km</i></div>
+        <div class="readout"><span>ε</span><b id="r_e">—</b><i></i></div>
+        <div class="readout wide type"><span>Bahnart</span><b id="r_type">—</b></div>
+      </div>
+      <div class="scale-bar">
+        <div class="scale-line"></div>
+        <span id="scale-label">— km</span>
+      </div>
+      <div class="crash-banner" id="crashBanner">Satellit aufgeprallt</div>
+    </section>
+
+    <aside class="panel">
+      <section class="card">
+        <h3>Startposition</h3>
+        <div class="field">
+          <label>Höhe über Boden</label>
+          <div class="inputrow">
+            <input type="number" id="in_alt" value="0" step="100">
+            <span class="unit">km</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>Position um Zentralkörper</label>
+          <div class="inputrow">
+            <input type="number" id="in_pos_angle" value="90" step="5">
+            <span class="unit">°</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h3>Geschwindigkeit</h3>
+        <div class="field">
+          <label>Betrag |v|</label>
+          <div class="inputrow">
+            <input type="number" id="in_v" value="7910" step="10">
+            <span class="unit">m/s</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>Winkel zur Tangente</label>
+          <div class="inputrow">
+            <input type="number" id="in_v_angle" value="0" step="5">
+            <span class="unit">°</span>
+          </div>
+        </div>
+        <p class="hint">0° = tangential zum Kreis · oder Pfeil im Bild ziehen.</p>
+      </section>
+
+      <section class="card">
+        <h3>Zentralkörper-Masse</h3>
+        <div class="field">
+          <label>M (Eingabe in kg, z. B. 5.972e24)</label>
+          <div class="inputrow">
+            <input type="text" id="in_mass" value="5.972e24">
+            <span class="unit">kg</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>Radius</label>
+          <div class="inputrow">
+            <input type="number" id="in_radius" value="6371" step="100">
+            <span class="unit">km</span>
+          </div>
+        </div>
+        <div class="presets">
+          <button data-mass="7.342e22" data-radius="1737">Mond</button>
+          <button data-mass="5.972e24" data-radius="6371" class="active">Erde</button>
+          <button data-mass="6.39e23"  data-radius="3389">Mars</button>
+          <button data-mass="1.898e27" data-radius="69911">Jupiter</button>
+          <button data-mass="1.989e30" data-radius="695700">Sonne</button>
+          <button data-mass="8.681e25" data-radius="25362">Uranus</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h3>v-Presets (für aktuelle Höhe)</h3>
+        <div class="presets v-presets">
+          <button data-vpreset="half">½ · v₁  (Sturz)</button>
+          <button data-vpreset="v1">1. kosm. · Kreisbahn</button>
+          <button data-vpreset="ellipse">v₁ &lt; v &lt; v₂ · Ellipse</button>
+          <button data-vpreset="v2">2. kosm. · Flucht</button>
+          <button data-vpreset="v3">3. kosm. (Erde) · Sonnensystem</button>
+          <button data-vpreset="iss">ISS-Höhe</button>
+        </div>
+        <div class="cosmic-info">
+          <div><span>v₁ hier</span><b id="info_v1">7,91</b><i>km/s</i></div>
+          <div><span>v₂ hier</span><b id="info_v2">11,19</b><i>km/s</i></div>
+          <div><span>v₃ Erde</span><b>16,65</b><i>km/s</i></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h3>Ansicht &amp; Zeit</h3>
+        <div class="field">
+          <label>Zoom</label>
+          <div class="field-row">
+            <input type="range" id="in_zoom" min="-3" max="4" step="0.05" value="0">
+            <span class="unit" id="zoom_label">1,0×</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>Zeitraffer</label>
+          <div class="field-row">
+            <input type="range" id="in_speed" min="0" max="4" step="0.05" value="2.7">
+            <span class="unit" id="speed_label">500×</span>
+          </div>
+        </div>
+        <label class="check"><input type="checkbox" id="in_trail" checked><span>Bahnspur zeigen</span></label>
+        <label class="check"><input type="checkbox" id="in_follow"><span>Auto-Zoom (folgt Satellit)</span></label>
+        <label class="check"><input type="checkbox" id="in_grid"><span>Gitter zeigen</span></label>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="controls-bar">
+    <button id="btn_play" class="primary">▶ Start</button>
+    <button id="btn_reset">↺ Reset</button>
+    <button id="btn_clear_trail">Spur leeren</button>
+    <span class="hotkeys">Leertaste: ▶/⏸ · R: Reset · 1/2/3: Presets · Mausrad: Zoom · Pfeil ziehen: v setzen</span>
+  </footer>
+</div>
+
+<script>
+// =============================================================
+//  PHYSIKKONSTANTEN
+// =============================================================
+const G = 6.67430e-11;          // N·m²/kg²
+const V3_EARTH = 16650;         // m/s, 3. kosm. Geschw. ab Erdoberfläche
+const ISS_ALT  = 408e3;         // m
+
+// =============================================================
+//  ZUSTAND
+// =============================================================
+const state = {
+  // Zentralkörper
+  central: { mass: 5.972e24, radius: 6.371e6 },
+  // Satellit (SI-Einheiten: m, m/s)
+  sat:     { x: 0, y: 6.371e6, vx: 7910, vy: 0 },
+  // Anfangszustand (für Reset)
+  initial: { x: 0, y: 6.371e6, vx: 7910, vy: 0 },
+  // Spur
+  trail:   [],
+  trailMax: 4000,
+  trailEveryN: 1,
+  // Steuerung
+  running: false,
+  crashed: false,
+  timeScale: 500,   // Sim-Sekunden pro Real-Sekunde
+  // Ansicht
+  viewScale: 1,     // px pro m
+  viewCenter: {x: 0, y: 0},
+  zoomExp: 0,
+  follow: false,
+  showTrail: true,
+  showGrid: false,
+  // Eingabe
+  drag: null,       // {type: 'arrow' | 'sat', ...}
+};
+
+// =============================================================
+//  CANVAS-SETUP
+// =============================================================
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let DPR = window.devicePixelRatio || 1;
+
+function resize() {
+  const rect = canvas.getBoundingClientRect();
+  canvas.width  = Math.round(rect.width  * DPR);
+  canvas.height = Math.round(rect.height * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  computeDefaultScale();
+}
+
+function computeDefaultScale() {
+  // Standard: 5 Zentralkörper-Radien um Erde sichtbar
+  const rect = canvas.getBoundingClientRect();
+  const minSide = Math.min(rect.width, rect.height);
+  const baseScale = minSide / (state.central.radius * 10);
+  state.viewScale = baseScale * Math.pow(2, state.zoomExp);
+}
+
+// =============================================================
+//  KOORDINATEN-TRANSFORMATION
+//  Welt: y nach oben; Canvas: y nach unten → flip
+// =============================================================
+function w2s(x, y) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    sx:  (x - state.viewCenter.x) * state.viewScale + rect.width  / 2,
+    sy: -(y - state.viewCenter.y) * state.viewScale + rect.height / 2,
+  };
+}
+
+function s2w(sx, sy) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x:  (sx - rect.width  / 2) / state.viewScale + state.viewCenter.x,
+    y: -(sy - rect.height / 2) / state.viewScale + state.viewCenter.y,
+  };
+}
+
+// =============================================================
+//  PHYSIK
+// =============================================================
+function gravAccel(x, y) {
+  const r2 = x*x + y*y;
+  const r  = Math.sqrt(r2);
+  const a  = -G * state.central.mass / r2;
+  return { ax: a * x / r, ay: a * y / r };
+}
+
+function stepVerlet(dt) {
+  const s = state.sat;
+  let { ax, ay } = gravAccel(s.x, s.y);
+  // halber Geschwindigkeitsschritt
+  s.vx += 0.5 * ax * dt;
+  s.vy += 0.5 * ay * dt;
+  // Positionsschritt
+  s.x  += s.vx * dt;
+  s.y  += s.vy * dt;
+  // neue Beschleunigung
+  ({ ax, ay } = gravAccel(s.x, s.y));
+  s.vx += 0.5 * ax * dt;
+  s.vy += 0.5 * ay * dt;
+  // Kollision
+  const r = Math.hypot(s.x, s.y);
+  if (r <= state.central.radius) {
+    state.crashed = true;
+    state.running = false;
+    showCrash(true);
+  }
+}
+
+// Bahnklassifikation
+function orbitInfo() {
+  const s = state.sat;
+  const r  = Math.hypot(s.x, s.y);
+  const v2 = s.vx*s.vx + s.vy*s.vy;
+  const v  = Math.sqrt(v2);
+  const GM = G * state.central.mass;
+  const E  = 0.5 * v2 - GM / r;        // spezif. Energie (J/kg)
+  const L  = s.x * s.vy - s.y * s.vx;  // spezif. Drehimpuls
+  const e2 = 1 + 2 * E * L * L / (GM * GM);
+  const e  = Math.sqrt(Math.max(0, e2));
+
+  let type, color;
+  if (E >= 0) {
+    if (e < 1.0005) { type = 'Parabel · Fluchtgrenze'; color = 'var(--warn)'; }
+    else            { type = 'Hyperbel · ungebundene Flucht'; color = 'var(--escape)'; }
+  } else {
+    if (e < 0.01)   { type = 'Kreisbahn'; color = 'var(--bound)'; }
+    else            { type = `Ellipse (ε = ${e.toFixed(3)})`; color = 'var(--bound)'; }
+  }
+  return { type, color, E, e, r, v };
+}
+
+// v₁, v₂ am aktuellen Ort
+function v1_here() { return Math.sqrt(G * state.central.mass / Math.hypot(state.sat.x, state.sat.y)); }
+function v2_here() { return Math.sqrt(2 * G * state.central.mass / Math.hypot(state.sat.x, state.sat.y)); }
+
+// =============================================================
+//  RENDERING
+// =============================================================
+function drawBackground() {
+  // dezente Sterne – seedbasiert, damit sie bei jedem Frame an derselben Stelle bleiben
+  if (!drawBackground.stars) {
+    drawBackground.stars = [];
+    let seed = 42;
+    const rand = () => {
+      seed = (seed * 9301 + 49297) % 233280;
+      return seed / 233280;
+    };
+    for (let i = 0; i < 220; i++) {
+      drawBackground.stars.push({
+        x: rand(),
+        y: rand(),
+        r: 0.3 + rand() * 1.2,
+        a: 0.2 + rand() * 0.6,
+      });
+    }
+  }
+  const rect = canvas.getBoundingClientRect();
+  for (const s of drawBackground.stars) {
+    ctx.fillStyle = `rgba(220, 230, 255, ${s.a})`;
+    ctx.beginPath();
+    ctx.arc(s.x * rect.width, s.y * rect.height, s.r, 0, Math.PI*2);
+    ctx.fill();
+  }
+}
+
+function drawGrid() {
+  if (!state.showGrid) return;
+  const rect = canvas.getBoundingClientRect();
+  const gridM = niceStep(rect.width / state.viewScale / 8);
+  const left = state.viewCenter.x - rect.width  / 2 / state.viewScale;
+  const right= state.viewCenter.x + rect.width  / 2 / state.viewScale;
+  const top  = state.viewCenter.y + rect.height / 2 / state.viewScale;
+  const bot  = state.viewCenter.y - rect.height / 2 / state.viewScale;
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = Math.ceil(left/gridM)*gridM; x <= right; x += gridM) {
+    const p1 = w2s(x, bot), p2 = w2s(x, top);
+    ctx.moveTo(p1.sx, p1.sy); ctx.lineTo(p2.sx, p2.sy);
+  }
+  for (let y = Math.ceil(bot/gridM)*gridM; y <= top; y += gridM) {
+    const p1 = w2s(left, y), p2 = w2s(right, y);
+    ctx.moveTo(p1.sx, p1.sy); ctx.lineTo(p2.sx, p2.sy);
+  }
+  ctx.stroke();
+}
+
+function niceStep(raw) {
+  const exp = Math.floor(Math.log10(raw));
+  const base = raw / Math.pow(10, exp);
+  let nice;
+  if (base < 1.5) nice = 1;
+  else if (base < 3.5) nice = 2;
+  else if (base < 7.5) nice = 5;
+  else nice = 10;
+  return nice * Math.pow(10, exp);
+}
+
+function drawEarth() {
+  const c = w2s(0, 0);
+  const rPx = state.central.radius * state.viewScale;
+
+  // weicher Glow
+  const glow = ctx.createRadialGradient(c.sx, c.sy, rPx*0.95, c.sx, c.sy, rPx*1.6);
+  glow.addColorStop(0, 'rgba(74,144,226,0.35)');
+  glow.addColorStop(1, 'rgba(74,144,226,0)');
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(c.sx, c.sy, rPx * 1.6, 0, Math.PI*2);
+  ctx.fill();
+
+  // Planetenkugel mit Beleuchtungs-Gradient
+  const grad = ctx.createRadialGradient(c.sx - rPx*0.3, c.sy - rPx*0.3, rPx*0.1,
+                                        c.sx, c.sy, rPx);
+  if (state.central.mass > 5e29) {
+    // Stern (Sonne)
+    grad.addColorStop(0, '#fff8d6');
+    grad.addColorStop(0.5, '#fbbf24');
+    grad.addColorStop(1, '#d97706');
+  } else if (state.central.mass > 1e27) {
+    // Gasriese
+    grad.addColorStop(0, '#f4d59a');
+    grad.addColorStop(1, '#7a5230');
+  } else {
+    // Erde-artig
+    grad.addColorStop(0, '#7fb3e8');
+    grad.addColorStop(0.7, '#3268a8');
+    grad.addColorStop(1, '#163760');
+  }
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(c.sx, c.sy, rPx, 0, Math.PI*2);
+  ctx.fill();
+
+  // angedeutete Kontinente nur bei Erde
+  if (Math.abs(state.central.mass - 5.972e24) / 5.972e24 < 0.01 && rPx > 18) {
+    ctx.fillStyle = 'rgba(58, 125, 87, 0.55)';
+    // einfache Pseudo-Kontinente
+    drawBlob(c.sx - rPx*0.25, c.sy - rPx*0.15, rPx*0.35, rPx*0.22);
+    drawBlob(c.sx + rPx*0.35, c.sy + rPx*0.05, rPx*0.28, rPx*0.18);
+    drawBlob(c.sx - rPx*0.05, c.sy + rPx*0.45, rPx*0.18, rPx*0.12);
+  }
+}
+
+function drawBlob(cx, cy, rx, ry) {
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI*2);
+  ctx.fill();
+}
+
+function drawTrail() {
+  if (!state.showTrail || state.trail.length < 2) return;
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  // farbverlauf entlang der spur per segmenten
+  const N = state.trail.length;
+  for (let i = 1; i < N; i++) {
+    const a = state.trail[i-1], b = state.trail[i];
+    const p1 = w2s(a.x, a.y), p2 = w2s(b.x, b.y);
+    const t = i / N;
+    ctx.strokeStyle = `rgba(34, 211, 238, ${0.15 + 0.7*t})`;
+    ctx.beginPath();
+    ctx.moveTo(p1.sx, p1.sy);
+    ctx.lineTo(p2.sx, p2.sy);
+    ctx.stroke();
+  }
+}
+
+function drawSatellite() {
+  const p = w2s(state.sat.x, state.sat.y);
+  // glow
+  const glow = ctx.createRadialGradient(p.sx, p.sy, 1, p.sx, p.sy, 14);
+  glow.addColorStop(0, 'rgba(251, 191, 36, 0.7)');
+  glow.addColorStop(1, 'rgba(251, 191, 36, 0)');
+  ctx.fillStyle = glow;
+  ctx.beginPath(); ctx.arc(p.sx, p.sy, 14, 0, Math.PI*2); ctx.fill();
+  // kern
+  ctx.fillStyle = '#fbbf24';
+  ctx.beginPath(); ctx.arc(p.sx, p.sy, 4, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = '#fffbea';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+// Pfeillänge auf Bildschirm = |v| * arrowScale_px_per_mps
+function arrowScale() {
+  // skaliert mit Erde-Radius-Sichtbarkeit, damit Pfeil bei Zoom mitwächst, aber gedeckelt
+  const rect = canvas.getBoundingClientRect();
+  const ref = Math.min(rect.width, rect.height) * 0.18; // Ziel-Pixellänge bei 10 km/s
+  return ref / 10000;
+}
+
+function drawVelocityArrow() {
+  const p = w2s(state.sat.x, state.sat.y);
+  const sc = arrowScale();
+  const tipX = p.sx + state.sat.vx * sc;
+  const tipY = p.sy - state.sat.vy * sc;       // y flip
+  const dx = tipX - p.sx, dy = tipY - p.sy;
+  const len = Math.hypot(dx, dy);
+  if (len < 4) return;
+
+  ctx.strokeStyle = '#22d3ee';
+  ctx.fillStyle   = '#22d3ee';
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+
+  // Schaft
+  ctx.beginPath();
+  ctx.moveTo(p.sx, p.sy);
+  ctx.lineTo(tipX, tipY);
+  ctx.stroke();
+
+  // Pfeilspitze
+  const ang = Math.atan2(dy, dx);
+  const head = 10;
+  ctx.beginPath();
+  ctx.moveTo(tipX, tipY);
+  ctx.lineTo(tipX - head * Math.cos(ang - 0.35), tipY - head * Math.sin(ang - 0.35));
+  ctx.lineTo(tipX - head * Math.cos(ang + 0.35), tipY - head * Math.sin(ang + 0.35));
+  ctx.closePath();
+  ctx.fill();
+
+  // Griff (am Tip) – sichtbar nur, wenn pausiert oder schon im Hover
+  if (!state.running) {
+    ctx.fillStyle = 'rgba(34, 211, 238, 0.25)';
+    ctx.beginPath();
+    ctx.arc(tipX, tipY, 8, 0, Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle = '#22d3ee';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+}
+
+function drawScaleBar() {
+  const rect = canvas.getBoundingClientRect();
+  // Ziel: ~80 px lang
+  const targetPx = 80;
+  const targetM = targetPx / state.viewScale;
+  const niceM = niceStep(targetM);
+  const widthPx = niceM * state.viewScale;
+  const bar = document.querySelector('.scale-line');
+  bar.style.width = widthPx + 'px';
+  const lbl = document.getElementById('scale-label');
+  if (niceM >= 1e6) lbl.textContent = (niceM/1e6).toFixed(1).replace('.', ',') + ' · 10³ km';
+  else if (niceM >= 1000) lbl.textContent = (niceM/1000).toFixed(0) + ' km';
+  else lbl.textContent = niceM.toFixed(0) + ' m';
+}
+
+function render() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawBackground();
+  drawGrid();
+  drawTrail();
+  drawEarth();
+  drawSatellite();
+  drawVelocityArrow();
+  drawScaleBar();
+}
+
+// =============================================================
+//  HUD AKTUALISIEREN
+// =============================================================
+function fmt(n, d=2) {
+  if (!isFinite(n)) return '—';
+  return n.toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+
+function updateHud() {
+  const info = orbitInfo();
+  const h = (info.r - state.central.radius) / 1000;
+  document.getElementById('r_v').textContent    = fmt(info.v/1000, 3);
+  document.getElementById('r_r').textContent    = fmt(info.r/1000, 1);
+  document.getElementById('r_h').textContent    = fmt(h, 1);
+  document.getElementById('r_e').textContent    = isFinite(info.e) ? fmt(info.e, 3) : '—';
+  const typeEl = document.getElementById('r_type');
+  typeEl.textContent = info.type;
+  typeEl.style.color = info.color;
+  document.getElementById('info_v1').textContent = fmt(v1_here()/1000, 2);
+  document.getElementById('info_v2').textContent = fmt(v2_here()/1000, 2);
+}
+
+// =============================================================
+//  ANIMATIONS-LOOP
+// =============================================================
+let lastT = 0;
+function tick(t) {
+  const realDt = Math.min(0.05, (t - lastT) / 1000);   // s
+  lastT = t;
+
+  if (state.running) {
+    const simDt = realDt * state.timeScale;
+    // adaptive Substeps: dt ≤ T_orbit/2000 (näherungsweise)
+    const r = Math.hypot(state.sat.x, state.sat.y);
+    const Tapprox = 2 * Math.PI * Math.sqrt(Math.pow(r, 3) / (G * state.central.mass));
+    const maxStep = Math.max(0.01, Tapprox / 2000);
+    let n = Math.max(1, Math.ceil(simDt / maxStep));
+    if (n > 3000) n = 3000;   // Schutz vor Frame-Stau
+    const dt = simDt / n;
+    for (let i = 0; i < n; i++) {
+      stepVerlet(dt);
+      if (state.crashed) break;
+      // Spur sammeln (nicht zu dicht)
+      state.trailEveryN = Math.max(1, Math.floor(n / 6));
+      if (i % state.trailEveryN === 0) {
+        state.trail.push({ x: state.sat.x, y: state.sat.y });
+        if (state.trail.length > state.trailMax) state.trail.shift();
+      }
+    }
+    if (state.follow) {
+      // sanft folgen / dynamisch zoomen
+      const r2 = Math.hypot(state.sat.x, state.sat.y);
+      const rect = canvas.getBoundingClientRect();
+      const want = Math.min(rect.width, rect.height) / (2.4 * r2);
+      // exponentiell glätten
+      state.viewScale = state.viewScale * 0.92 + want * 0.08;
+    }
+  }
+
+  render();
+  updateHud();
+  requestAnimationFrame(tick);
+}
+
+// =============================================================
+//  UI-EVENTS
+// =============================================================
+const $ = id => document.getElementById(id);
+
+function applyInputsToState() {
+  const altKm   = parseFloat($('in_alt').value)        || 0;
+  const posDeg  = parseFloat($('in_pos_angle').value)  || 90;
+  const vMag    = parseFloat($('in_v').value)          || 0;
+  const vDeg    = parseFloat($('in_v_angle').value)    || 0;
+  const mass    = parseFloat($('in_mass').value)       || 5.972e24;
+  const radKm   = parseFloat($('in_radius').value)     || 6371;
+
+  state.central.mass   = mass;
+  state.central.radius = radKm * 1000;
+
+  const r = state.central.radius + altKm * 1000;
+  const posRad = posDeg * Math.PI / 180;
+  state.sat.x = r * Math.cos(posRad);
+  state.sat.y = r * Math.sin(posRad);
+
+  // tangentiale Richtung: senkrecht zum Radiusvektor (gegen Uhrzeigersinn)
+  const tangX = -Math.sin(posRad);
+  const tangY =  Math.cos(posRad);
+  const radX  =  Math.cos(posRad);   // radial nach außen
+  const radY  =  Math.sin(posRad);
+  const vRad  = vDeg * Math.PI / 180;
+  // v_angle = 0 → rein tangential; positiv → nach außen kippen
+  const vx = vMag * (tangX * Math.cos(vRad) + radX * Math.sin(vRad));
+  const vy = vMag * (tangY * Math.cos(vRad) + radY * Math.sin(vRad));
+  state.sat.vx = vx;
+  state.sat.vy = vy;
+
+  // Initialzustand für Reset speichern
+  state.initial = { x: state.sat.x, y: state.sat.y, vx: state.sat.vx, vy: state.sat.vy };
+
+  computeDefaultScale();
+}
+
+function readBackToInputs() {
+  // setzt Eingabefelder aus aktuellem Zustand (für Pfeil-Drag)
+  const r = Math.hypot(state.sat.x, state.sat.y);
+  const altKm = (r - state.central.radius) / 1000;
+  const posDeg = Math.atan2(state.sat.y, state.sat.x) * 180 / Math.PI;
+  const v = Math.hypot(state.sat.vx, state.sat.vy);
+  // Winkel zwischen v und Tangente:
+  const posRad = posDeg * Math.PI / 180;
+  const tangX = -Math.sin(posRad), tangY = Math.cos(posRad);
+  const radX  =  Math.cos(posRad), radY  = Math.sin(posRad);
+  const vTan = state.sat.vx * tangX + state.sat.vy * tangY;
+  const vRad = state.sat.vx * radX  + state.sat.vy * radY;
+  const angDeg = Math.atan2(vRad, vTan) * 180 / Math.PI;
+  $('in_alt').value = altKm.toFixed(1);
+  $('in_pos_angle').value = posDeg.toFixed(1);
+  $('in_v').value   = v.toFixed(0);
+  $('in_v_angle').value = angDeg.toFixed(1);
+}
+
+function resetSimulation() {
+  state.sat.x  = state.initial.x;
+  state.sat.y  = state.initial.y;
+  state.sat.vx = state.initial.vx;
+  state.sat.vy = state.initial.vy;
+  state.trail.length = 0;
+  state.crashed = false;
+  showCrash(false);
+  state.running = false;
+  $('btn_play').textContent = '▶ Start';
+  $('btn_play').classList.remove('paused');
+}
+
+function showCrash(on) {
+  document.getElementById('crashBanner').classList.toggle('show', on);
+}
+
+// Input-Listener: nur auf 'change' (Blur/Enter), nicht pro Tastendruck —
+// sonst flackert beim Tippen "5.972e24" alles wild.
+['in_alt','in_pos_angle','in_v','in_v_angle','in_mass','in_radius'].forEach(id => {
+  $(id).addEventListener('change', () => {
+    if (state.crashed) { state.crashed = false; showCrash(false); }
+    applyInputsToState();
+    state.trail.length = 0;
+  });
+});
+
+// Mass-Presets
+document.querySelectorAll('.card .presets:not(.v-presets) button').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.card .presets:not(.v-presets) button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    $('in_mass').value = b.dataset.mass;
+    $('in_radius').value = b.dataset.radius;
+    applyInputsToState();
+    resetSimulation();
+  });
+});
+
+// v-Presets
+function applyVPreset(kind) {
+  let v;
+  switch (kind) {
+    case 'half':    v = 0.5 * v1_here(); break;
+    case 'v1':      v = v1_here(); break;
+    case 'ellipse': v = (v1_here() + v2_here()) / 2; break;
+    case 'v2':      v = v2_here() * 1.001; break;   // knapp über Flucht
+    case 'v3':      v = V3_EARTH; break;
+    case 'iss': {
+      $('in_alt').value = (ISS_ALT/1000).toFixed(0);
+      applyInputsToState();
+      v = v1_here();
+      break;
+    }
+  }
+  $('in_v').value = v.toFixed(0);
+  $('in_v_angle').value = 0;
+  applyInputsToState();
+  resetSimulation();
+}
+
+document.querySelectorAll('.v-presets button').forEach(b => {
+  b.addEventListener('click', () => applyVPreset(b.dataset.vpreset));
+});
+
+// Buttons
+$('btn_play').addEventListener('click', () => {
+  if (state.crashed) resetSimulation();
+  state.running = !state.running;
+  $('btn_play').textContent = state.running ? '⏸ Pause' : '▶ Start';
+  $('btn_play').classList.toggle('paused', state.running);
+});
+$('btn_reset').addEventListener('click', resetSimulation);
+$('btn_clear_trail').addEventListener('click', () => state.trail.length = 0);
+
+// Zoom / Speed Slider
+$('in_zoom').addEventListener('input', () => {
+  state.zoomExp = parseFloat($('in_zoom').value);
+  computeDefaultScale();
+  $('zoom_label').textContent = formatZoom(Math.pow(2, state.zoomExp));
+});
+function formatZoom(z) {
+  if (z >= 100)   return z.toFixed(0) + '×';
+  if (z >= 10)    return z.toFixed(1) + '×';
+  return z.toFixed(2).replace('.', ',') + '×';
+}
+
+$('in_speed').addEventListener('input', () => {
+  const sliderVal = parseFloat($('in_speed').value);
+  state.timeScale = Math.round(Math.pow(10, sliderVal));
+  $('speed_label').textContent = state.timeScale.toLocaleString('de-DE') + '×';
+});
+// init speed label
+$('in_speed').dispatchEvent(new Event('input'));
+
+$('in_trail').addEventListener('change', e => state.showTrail = e.target.checked);
+$('in_follow').addEventListener('change', e => state.follow = e.target.checked);
+$('in_grid').addEventListener('change', e => state.showGrid = e.target.checked);
+
+// =============================================================
+//  CANVAS MAUS-INTERAKTION
+// =============================================================
+function canvasCoords(e) {
+  const rect = canvas.getBoundingClientRect();
+  return { sx: e.clientX - rect.left, sy: e.clientY - rect.top };
+}
+
+function arrowTipScreen() {
+  const p = w2s(state.sat.x, state.sat.y);
+  const sc = arrowScale();
+  return { sx: p.sx + state.sat.vx * sc, sy: p.sy - state.sat.vy * sc };
+}
+
+canvas.addEventListener('mousedown', (e) => {
+  const {sx, sy} = canvasCoords(e);
+  const tip = arrowTipScreen();
+  const dTip = Math.hypot(sx - tip.sx, sy - tip.sy);
+  const pSat = w2s(state.sat.x, state.sat.y);
+  const dSat = Math.hypot(sx - pSat.sx, sy - pSat.sy);
+
+  if (dTip < 14) {
+    state.drag = { type: 'arrow' };
+    canvas.classList.add('drag-arrow');
+  } else if (dSat < 14) {
+    state.drag = { type: 'sat' };
+    canvas.classList.add('drag-arrow');
+  }
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  const {sx, sy} = canvasCoords(e);
+  const tip = arrowTipScreen();
+  const dTip = Math.hypot(sx - tip.sx, sy - tip.sy);
+  const pSat = w2s(state.sat.x, state.sat.y);
+  const dSat = Math.hypot(sx - pSat.sx, sy - pSat.sy);
+
+  canvas.classList.toggle('over-arrow', !state.drag && dTip < 14);
+  canvas.classList.toggle('over-sat',   !state.drag && dSat < 14 && dTip >= 14);
+
+  if (!state.drag) return;
+
+  if (state.drag.type === 'arrow') {
+    // neuer Tip → neue v
+    const p = w2s(state.sat.x, state.sat.y);
+    const sc = arrowScale();
+    state.sat.vx =  (sx - p.sx) / sc;
+    state.sat.vy = -(sy - p.sy) / sc;
+    state.initial.vx = state.sat.vx;
+    state.initial.vy = state.sat.vy;
+    readBackToInputs();
+    state.trail.length = 0;
+  } else if (state.drag.type === 'sat') {
+    const w = s2w(sx, sy);
+    // verhindere, dass der Satellit in den Zentralkörper rutscht
+    const r = Math.hypot(w.x, w.y);
+    if (r > state.central.radius * 1.01) {
+      state.sat.x = w.x;
+      state.sat.y = w.y;
+      state.initial.x = w.x;
+      state.initial.y = w.y;
+      readBackToInputs();
+      state.trail.length = 0;
+    }
+  }
+});
+
+window.addEventListener('mouseup', () => {
+  state.drag = null;
+  canvas.classList.remove('drag-arrow');
+});
+
+// Mausrad-Zoom
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const delta = -Math.sign(e.deltaY) * 0.2;
+  let exp = state.zoomExp + delta;
+  exp = Math.max(-3, Math.min(4, exp));
+  state.zoomExp = exp;
+  $('in_zoom').value = exp;
+  $('zoom_label').textContent = formatZoom(Math.pow(2, exp));
+  computeDefaultScale();
+}, { passive: false });
+
+// Tastenkürzel
+window.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space') {
+    e.preventDefault();
+    $('btn_play').click();
+  } else if (e.key === 'r' || e.key === 'R') {
+    resetSimulation();
+  } else if (e.key === '1') { applyVPreset('v1'); }
+  else if (e.key === '2') { applyVPreset('v2'); }
+  else if (e.key === '3') { applyVPreset('v3'); }
+});
+
+// =============================================================
+//  STARTUP
+// =============================================================
+window.addEventListener('resize', resize);
+resize();
+applyInputsToState();
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
