@@ -41,6 +41,7 @@
     font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     font-size: 14px;
     overflow: hidden;
+    -webkit-text-size-adjust: 100%;
   }
 
   .app {
@@ -135,6 +136,7 @@
     width: 100%;
     height: 100%;
     cursor: crosshair;
+    touch-action: none;        /* Touch-Gesten gehören dem Canvas, nicht dem Browser-Scroll */
   }
 
   canvas.drag-arrow { cursor: grabbing; }
@@ -497,10 +499,65 @@
     font-family: 'IBM Plex Mono', monospace;
   }
 
-  /* responsive */
-  @media (max-width: 980px) {
-    main { grid-template-columns: 1fr; grid-template-rows: 60vh 1fr; }
-    .panel { max-height: none; }
+  /* === RESPONSIVE: Tablet + Mobile === */
+  @media (max-width: 1080px) {
+    html, body {
+      overflow: auto;          /* Scrollen erlauben */
+      height: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .app {
+      height: auto;
+      min-height: 100vh;
+      grid-template-rows: auto auto auto;
+    }
+    main {
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+    .stage {
+      height: 55vh;             /* feste sichtbare Canvas-Höhe */
+      min-height: 360px;
+    }
+    .panel {
+      overflow: visible;        /* kein internes Scrollen — natürlich nach unten */
+      max-height: none;
+    }
+    /* Controls am unteren Bildschirmrand "kleben" lassen, damit Start-Button erreichbar bleibt */
+    .controls-bar {
+      position: sticky;
+      bottom: 0;
+      background: linear-gradient(180deg, transparent 0%, var(--bg-grad-2) 30%);
+      padding: 14px 4px;
+      z-index: 10;
+      backdrop-filter: blur(6px);
+    }
+    .hotkeys { display: none; }   /* Tastenkürzel auf Touch-Geräten ausblenden */
+    /* etwas größere Touch-Ziele */
+    .controls-bar button {
+      padding: 10px 16px;
+      font-size: 14px;
+    }
+    .presets button {
+      padding: 9px 6px;
+      font-size: 12px;
+    }
+    .inputrow input {
+      font-size: 16px;            /* verhindert iOS-Auto-Zoom beim Tippen */
+      padding: 8px 10px;
+    }
+  }
+
+  @media (max-width: 560px) {
+    header { flex-direction: column; gap: 8px; align-items: flex-start; }
+    .legend { flex-wrap: wrap; gap: 10px; }
+    .title h1 { font-size: 16px; }
+    .stage { height: 50vh; min-height: 300px; }
+    .hud {
+      grid-template-columns: 1fr 1fr;
+      font-size: 11px;
+      padding: 8px 10px;
+    }
   }
 </style>
 </head>
@@ -849,49 +906,257 @@ function niceStep(raw) {
   return nice * Math.pow(10, exp);
 }
 
-function drawEarth() {
+// Per-Körper-Palette: definiert Farben, Glow und Oberflächen-Stil
+function getBodyVisuals(mass) {
+  const match = (target, tol = 0.05) => Math.abs(mass - target) / target < tol;
+  if (match(7.342e22)) return {  // Mond
+    type: 'moon',
+    grad: ['#eaeaec', '#9a9aa4', '#444450'],
+    outline: 'rgba(255,255,255,0.55)',
+    glow:    'rgba(200,205,220,0.18)',
+    glowEnd: 'rgba(200,205,220,0)',
+    glowR: 1.35, features: 'moon',
+  };
+  if (match(5.972e24)) return {  // Erde
+    type: 'earth',
+    grad: ['#8fc1f0', '#2f6cb0', '#0e2c52'],
+    outline: 'rgba(180,220,255,0.65)',
+    glow:    'rgba(74,144,226,0.32)',
+    glowEnd: 'rgba(74,144,226,0)',
+    glowR: 1.55, features: 'earth',
+  };
+  if (match(6.39e23)) return {   // Mars
+    type: 'mars',
+    grad: ['#f0a878', '#b35a32', '#4a1f10'],
+    outline: 'rgba(255,210,180,0.65)',
+    glow:    'rgba(220,110,70,0.25)',
+    glowEnd: 'rgba(220,110,70,0)',
+    glowR: 1.45, features: 'mars',
+  };
+  if (match(1.898e27)) return {  // Jupiter
+    type: 'jupiter',
+    grad: ['#f5e0b0', '#c79a5a', '#5a3c1e'],
+    outline: 'rgba(255,235,190,0.65)',
+    glow:    'rgba(220,180,110,0.28)',
+    glowEnd: 'rgba(220,180,110,0)',
+    glowR: 1.55, features: 'jupiter',
+  };
+  if (match(1.989e30)) return {  // Sonne
+    type: 'sun',
+    grad: ['#fffbe6', '#fcc842', '#d97706'],
+    outline: 'rgba(255,210,140,0.85)',
+    glow:    'rgba(255,200,80,0.55)',
+    glowEnd: 'rgba(255,200,80,0)',
+    glowR: 2.2, features: 'sun',
+  };
+  if (match(8.681e25)) return {  // Uranus
+    type: 'uranus',
+    grad: ['#bff0ee', '#5cb8c4', '#1f5560'],
+    outline: 'rgba(190,240,238,0.6)',
+    glow:    'rgba(120,200,210,0.25)',
+    glowEnd: 'rgba(120,200,210,0)',
+    glowR: 1.45, features: 'uranus',
+  };
+  // Fallback für freie Massen
+  return {
+    type: 'generic',
+    grad: ['#9aaecc', '#5a6e8c', '#1c2740'],
+    outline: 'rgba(220,230,250,0.55)',
+    glow:    'rgba(120,150,200,0.22)',
+    glowEnd: 'rgba(120,150,200,0)',
+    glowR: 1.4, features: null,
+  };
+}
+
+function drawCentralBody() {
   const c = w2s(0, 0);
   const rPx = state.central.radius * state.viewScale;
+  const v = getBodyVisuals(state.central.mass);
 
-  // weicher Glow
-  const glow = ctx.createRadialGradient(c.sx, c.sy, rPx*0.95, c.sx, c.sy, rPx*1.6);
-  glow.addColorStop(0, 'rgba(74,144,226,0.35)');
-  glow.addColorStop(1, 'rgba(74,144,226,0)');
+  // 1) Glow-Hof
+  const glow = ctx.createRadialGradient(c.sx, c.sy, rPx*0.98, c.sx, c.sy, rPx*v.glowR);
+  glow.addColorStop(0, v.glow);
+  glow.addColorStop(1, v.glowEnd);
   ctx.fillStyle = glow;
   ctx.beginPath();
-  ctx.arc(c.sx, c.sy, rPx * 1.6, 0, Math.PI*2);
+  ctx.arc(c.sx, c.sy, rPx * v.glowR, 0, Math.PI*2);
   ctx.fill();
 
-  // Planetenkugel mit Beleuchtungs-Gradient
-  const grad = ctx.createRadialGradient(c.sx - rPx*0.3, c.sy - rPx*0.3, rPx*0.1,
-                                        c.sx, c.sy, rPx);
-  if (state.central.mass > 5e29) {
-    // Stern (Sonne)
-    grad.addColorStop(0, '#fff8d6');
-    grad.addColorStop(0.5, '#fbbf24');
-    grad.addColorStop(1, '#d97706');
-  } else if (state.central.mass > 1e27) {
-    // Gasriese
-    grad.addColorStop(0, '#f4d59a');
-    grad.addColorStop(1, '#7a5230');
-  } else {
-    // Erde-artig
-    grad.addColorStop(0, '#7fb3e8');
-    grad.addColorStop(0.7, '#3268a8');
-    grad.addColorStop(1, '#163760');
+  // 2) Sonne: pulsierende Korona (subtil)
+  if (v.type === 'sun') {
+    const corona = ctx.createRadialGradient(c.sx, c.sy, rPx, c.sx, c.sy, rPx*1.25);
+    corona.addColorStop(0, 'rgba(255,240,200,0.4)');
+    corona.addColorStop(1, 'rgba(255,200,80,0)');
+    ctx.fillStyle = corona;
+    ctx.beginPath();
+    ctx.arc(c.sx, c.sy, rPx*1.25, 0, Math.PI*2);
+    ctx.fill();
   }
+
+  // 3) Planetenkugel mit Beleuchtungs-Gradient (Licht von links-oben)
+  const grad = ctx.createRadialGradient(
+    c.sx - rPx*0.35, c.sy - rPx*0.35, rPx*0.05,
+    c.sx, c.sy, rPx
+  );
+  grad.addColorStop(0,    v.grad[0]);
+  grad.addColorStop(0.55, v.grad[1]);
+  grad.addColorStop(1,    v.grad[2]);
   ctx.fillStyle = grad;
   ctx.beginPath();
   ctx.arc(c.sx, c.sy, rPx, 0, Math.PI*2);
   ctx.fill();
 
-  // angedeutete Kontinente nur bei Erde
-  if (Math.abs(state.central.mass - 5.972e24) / 5.972e24 < 0.01 && rPx > 18) {
-    ctx.fillStyle = 'rgba(58, 125, 87, 0.55)';
-    // einfache Pseudo-Kontinente
-    drawBlob(c.sx - rPx*0.25, c.sy - rPx*0.15, rPx*0.35, rPx*0.22);
-    drawBlob(c.sx + rPx*0.35, c.sy + rPx*0.05, rPx*0.28, rPx*0.18);
-    drawBlob(c.sx - rPx*0.05, c.sy + rPx*0.45, rPx*0.18, rPx*0.12);
+  // 4) Oberflächendetails (auf Disk geclippt)
+  if (rPx > 14 && v.features) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(c.sx, c.sy, rPx, 0, Math.PI*2);
+    ctx.clip();
+    drawSurfaceFeatures(c.sx, c.sy, rPx, v.features);
+    ctx.restore();
+  }
+
+  // 5) Sanfter Terminator (Schattenseite) für plastische Wirkung
+  if (v.type !== 'sun' && rPx > 8) {
+    const shadow = ctx.createRadialGradient(
+      c.sx + rPx*0.55, c.sy + rPx*0.55, rPx*0.1,
+      c.sx + rPx*0.2,  c.sy + rPx*0.2,  rPx*1.05
+    );
+    shadow.addColorStop(0, 'rgba(0,0,0,0.55)');
+    shadow.addColorStop(0.7, 'rgba(0,0,0,0.15)');
+    shadow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(c.sx, c.sy, rPx, 0, Math.PI*2);
+    ctx.clip();
+    ctx.fillStyle = shadow;
+    ctx.fillRect(c.sx - rPx, c.sy - rPx, rPx*2, rPx*2);
+    ctx.restore();
+  }
+
+  // 6) Kantenscharfe Randlinie EXAKT am Oberflächenradius
+  //    → eindeutige Trennung "Planet zu Ende" / "Weltraum + Glow beginnt"
+  //    → didaktisch wichtig: hier sind v₁ und v₂ definiert
+  ctx.strokeStyle = v.outline;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(c.sx, c.sy, rPx, 0, Math.PI*2);
+  ctx.stroke();
+}
+
+// Oberflächen-Features pro Körpertyp
+function drawSurfaceFeatures(cx, cy, r, type) {
+  switch (type) {
+    case 'earth': {
+      // Kontinente (grün)
+      ctx.fillStyle = 'rgba(58, 125, 87, 0.7)';
+      drawBlob(cx - r*0.25, cy - r*0.10, r*0.36, r*0.22);
+      drawBlob(cx + r*0.32, cy + r*0.08, r*0.28, r*0.20);
+      drawBlob(cx - r*0.05, cy + r*0.42, r*0.22, r*0.14);
+      drawBlob(cx + r*0.18, cy - r*0.42, r*0.18, r*0.10);
+      drawBlob(cx - r*0.50, cy + r*0.20, r*0.12, r*0.08);
+      // Polkappen
+      ctx.fillStyle = 'rgba(245, 250, 255, 0.55)';
+      drawBlob(cx, cy - r*0.88, r*0.55, r*0.18);
+      drawBlob(cx, cy + r*0.88, r*0.62, r*0.20);
+      // dünne Wolkenwirbel
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+      drawBlob(cx + r*0.05, cy - r*0.25, r*0.40, r*0.06);
+      drawBlob(cx - r*0.20, cy + r*0.55, r*0.30, r*0.05);
+      break;
+    }
+    case 'moon': {
+      // Mare (dunkle Tiefebenen) + Krater
+      const craters = [
+        [-0.30, -0.18, 0.20], [0.28, 0.12, 0.16], [0.06, -0.48, 0.12],
+        [-0.50, 0.30, 0.11], [0.42, -0.38, 0.09], [-0.10, 0.45, 0.14],
+        [0.50, 0.42, 0.08],  [-0.55, -0.45, 0.07], [0.15, 0.05, 0.05],
+        [-0.15, 0.18, 0.06],
+      ];
+      ctx.fillStyle = 'rgba(45, 45, 55, 0.40)';
+      for (const [x, y, s] of craters) {
+        ctx.beginPath();
+        ctx.arc(cx + r*x, cy + r*y, r*s, 0, Math.PI*2);
+        ctx.fill();
+      }
+      // Kraterhighlights (helle Ränder)
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+      ctx.lineWidth = 1;
+      for (const [x, y, s] of craters) {
+        ctx.beginPath();
+        ctx.arc(cx + r*x, cy + r*y, r*s, 0, Math.PI*2);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'mars': {
+      // dunkle Albedo-Flecken
+      ctx.fillStyle = 'rgba(90, 40, 22, 0.45)';
+      drawBlob(cx - r*0.22, cy + r*0.08, r*0.38, r*0.18);
+      drawBlob(cx + r*0.30, cy - r*0.18, r*0.26, r*0.14);
+      drawBlob(cx + r*0.15, cy + r*0.45, r*0.16, r*0.10);
+      drawBlob(cx - r*0.45, cy - r*0.30, r*0.18, r*0.10);
+      // helle Polkappen (CO₂-Eis)
+      ctx.fillStyle = 'rgba(255, 250, 240, 0.7)';
+      drawBlob(cx, cy - r*0.88, r*0.38, r*0.15);
+      drawBlob(cx, cy + r*0.88, r*0.32, r*0.13);
+      break;
+    }
+    case 'jupiter': {
+      // horizontale Wolkenbänder
+      const bands = [
+        { y: -0.78, h: 0.10, c: 'rgba(160, 110, 70, 0.55)' },
+        { y: -0.55, h: 0.16, c: 'rgba(245, 220, 170, 0.40)' },
+        { y: -0.30, h: 0.14, c: 'rgba(170, 120, 75, 0.55)' },
+        { y: -0.08, h: 0.16, c: 'rgba(240, 215, 165, 0.40)' },
+        { y:  0.14, h: 0.18, c: 'rgba(155, 100, 60, 0.55)' },
+        { y:  0.38, h: 0.16, c: 'rgba(235, 210, 160, 0.40)' },
+        { y:  0.60, h: 0.18, c: 'rgba(145, 95, 55, 0.55)' },
+      ];
+      for (const b of bands) {
+        ctx.fillStyle = b.c;
+        ctx.fillRect(cx - r, cy + r*b.y, r*2, r*b.h);
+      }
+      // Großer Roter Fleck
+      ctx.fillStyle = 'rgba(180, 65, 45, 0.75)';
+      ctx.beginPath();
+      ctx.ellipse(cx + r*0.30, cy + r*0.22, r*0.18, r*0.09, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(220, 110, 80, 0.5)';
+      ctx.beginPath();
+      ctx.ellipse(cx + r*0.30, cy + r*0.22, r*0.13, r*0.06, 0, 0, Math.PI*2);
+      ctx.fill();
+      break;
+    }
+    case 'sun': {
+      // körnige Granulation (helle Flecken)
+      ctx.fillStyle = 'rgba(255, 255, 220, 0.35)';
+      const grans = [
+        [-0.30, -0.20, 0.09], [0.25, 0.10, 0.07], [0.05, -0.50, 0.06],
+        [-0.50, 0.28, 0.08], [0.40, -0.40, 0.06], [-0.15, 0.45, 0.07],
+        [0.50, 0.30, 0.05], [-0.05, 0.05, 0.04], [0.20, 0.50, 0.06],
+      ];
+      for (const [x, y, s] of grans) {
+        ctx.beginPath();
+        ctx.arc(cx + r*x, cy + r*y, r*s, 0, Math.PI*2);
+        ctx.fill();
+      }
+      // dunkle Sonnenflecken
+      ctx.fillStyle = 'rgba(120, 60, 0, 0.5)';
+      ctx.beginPath(); ctx.arc(cx + r*0.20, cy + r*0.30, r*0.045, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx - r*0.30, cy - r*0.05, r*0.055, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx + r*0.40, cy - r*0.20, r*0.035, 0, Math.PI*2); ctx.fill();
+      break;
+    }
+    case 'uranus': {
+      // sehr subtile Bänder (Uranus ist fast featureless)
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+      ctx.fillRect(cx - r, cy - r*0.08, r*2, r*0.16);
+      ctx.fillStyle = 'rgba(0, 60, 80, 0.10)';
+      ctx.fillRect(cx - r, cy + r*0.30, r*2, r*0.18);
+      ctx.fillRect(cx - r, cy - r*0.50, r*2, r*0.12);
+      break;
+    }
   }
 }
 
@@ -1005,7 +1270,7 @@ function render() {
   drawBackground();
   drawGrid();
   drawTrail();
-  drawEarth();
+  drawCentralBody();
   drawSatellite();
   drawVelocityArrow();
   drawScaleBar();
@@ -1302,6 +1567,101 @@ canvas.addEventListener('mousemove', (e) => {
 window.addEventListener('mouseup', () => {
   state.drag = null;
   canvas.classList.remove('drag-arrow');
+});
+
+// =============================================================
+//  TOUCH-EVENTS (iPad / Tablet / Handy)
+// =============================================================
+// Trefferzone für Finger größer als für Maus
+const TOUCH_HIT_RADIUS = 28;
+
+function touchCoords(t) {
+  const rect = canvas.getBoundingClientRect();
+  return { sx: t.clientX - rect.left, sy: t.clientY - rect.top };
+}
+
+let pinchStartDist = 0;
+let pinchStartZoom = 0;
+
+canvas.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 1) {
+    const t = e.touches[0];
+    const { sx, sy } = touchCoords(t);
+    const tip = arrowTipScreen();
+    const dTip = Math.hypot(sx - tip.sx, sy - tip.sy);
+    const pSat = w2s(state.sat.x, state.sat.y);
+    const dSat = Math.hypot(sx - pSat.sx, sy - pSat.sy);
+
+    if (dTip < TOUCH_HIT_RADIUS) {
+      state.drag = { type: 'arrow' };
+      e.preventDefault();
+    } else if (dSat < TOUCH_HIT_RADIUS) {
+      state.drag = { type: 'sat' };
+      e.preventDefault();
+    }
+  } else if (e.touches.length === 2) {
+    // Pinch-Zoom Start
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    pinchStartDist = Math.hypot(dx, dy);
+    pinchStartZoom = state.zoomExp;
+    e.preventDefault();
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+  if (e.touches.length === 1 && state.drag) {
+    const t = e.touches[0];
+    const { sx, sy } = touchCoords(t);
+
+    if (state.drag.type === 'arrow') {
+      const p = w2s(state.sat.x, state.sat.y);
+      const sc = arrowScale();
+      state.sat.vx =  (sx - p.sx) / sc;
+      state.sat.vy = -(sy - p.sy) / sc;
+      state.initial.vx = state.sat.vx;
+      state.initial.vy = state.sat.vy;
+      readBackToInputs();
+      state.trail.length = 0;
+    } else if (state.drag.type === 'sat') {
+      const w = s2w(sx, sy);
+      const r = Math.hypot(w.x, w.y);
+      if (r > state.central.radius * 1.01) {
+        state.sat.x = w.x;
+        state.sat.y = w.y;
+        state.initial.x = w.x;
+        state.initial.y = w.y;
+        readBackToInputs();
+        state.trail.length = 0;
+      }
+    }
+    e.preventDefault();
+  } else if (e.touches.length === 2 && pinchStartDist > 0) {
+    // Pinch-Zoom
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.hypot(dx, dy);
+    const factor = Math.log2(dist / pinchStartDist);
+    let exp = pinchStartZoom + factor;
+    exp = Math.max(-3, Math.min(4, exp));
+    state.zoomExp = exp;
+    $('in_zoom').value = exp;
+    $('zoom_label').textContent = formatZoom(Math.pow(2, exp));
+    computeDefaultScale();
+    e.preventDefault();
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  if (e.touches.length === 0) {
+    state.drag = null;
+    pinchStartDist = 0;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchcancel', () => {
+  state.drag = null;
+  pinchStartDist = 0;
 });
 
 // Mausrad-Zoom
